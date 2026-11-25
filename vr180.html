@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VR180">
+<title>Lecteur VR180</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#eee;font-family:-apple-system,system-ui,sans-serif;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:5;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);overflow:auto}
+  #menu .box{width:min(520px,92vw);display:flex;flex-direction:column;gap:10px;padding:12px}
+  h1{font-size:18px;margin:0 0 4px}
+  input[type=url],select{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:10px;border:1px solid #444;background:#151515;color:#eee}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  button,label.btn{padding:13px;font-size:16px;border-radius:10px;border:0;background:#2d6cdf;color:#fff;text-align:center;font-weight:600}
+  label.btn{background:#333}
+  input[type=file]{display:none}
+  #err{color:#ff8a8a;font-size:14px;min-height:18px}
+  small{color:#888;line-height:1.4}
+  #bar{position:fixed;left:0;right:0;bottom:0;z-index:4;display:none;gap:8px;align-items:center;padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.75))}
+  #bar button{padding:8px 12px;font-size:15px;background:rgba(255,255,255,.18)}
+  #seek{flex:1}
+</style>
+</head>
+<body>
+<div id="menu"><div class="box">
+  <h1>Lecteur VR180 (gyroscope)</h1>
+  <input id="url" type="url" placeholder="Coller le lien direct de la vidéo (.mp4 / .m3u8)" autocapitalize="off" autocorrect="off">
+  <button id="goUrl">Lire le lien</button>
+  <label class="btn" for="file">… ou choisir un fichier vidéo</label>
+  <input id="file" type="file" accept="video/*">
+  <div class="row">
+    <select id="fmt"><option value="180">VR180</option><option value="360">360°</option></select>
+    <select id="lay"><option value="sbs">Côte à côte</option><option value="tb">Haut / bas</option><option value="mono">Mono</option></select>
+  </div>
+  <div id="err"></div>
+  <small>Touche l'écran pour afficher ou masquer les contrôles. Glisse le doigt pour tourner si le gyroscope ne répond pas. Écran noir avec le son = le serveur de la vidéo bloque l'accès (CORS) : essaie un autre lien ou télécharge le fichier.</small>
+</div></div>
+<div id="bar">
+  <button id="pp">⏸</button>
+  <input id="seek" type="range" min="0" max="1000" value="0">
+  <button id="rc">Recentrer</button>
+  <button id="mn">☰</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const video = document.createElement('video');
+video.playsInline = true;
+video.setAttribute('webkit-playsinline', '');
+video.loop = true;
+video.preload = 'auto';
+
+const renderer = new THREE.WebGLRenderer({antialias:false});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(85, 1, 0.1, 200);
+const tex = new THREE.VideoTexture(video);
+tex.minFilter = THREE.LinearFilter;
+tex.magFilter = THREE.LinearFilter;
+tex.format = THREE.RGBFormat;
+const mat = new THREE.MeshBasicMaterial({map: tex, side: THREE.DoubleSide});
+let mesh = null;
+
+function build() {
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  const f = $('fmt').value, l = $('lay').value;
+  const geo = f === '180'
+    ? new THREE.SphereGeometry(50, 64, 48, -Math.PI, Math.PI)
+    : new THREE.SphereGeometry(50, 64, 48);
+  geo.scale(-1, 1, 1);
+  mesh = new THREE.Mesh(geo, mat);
+  if (f === '360') mesh.rotation.y = -Math.PI / 2;
+  scene.add(mesh);
+  // Un seul oeil (le gauche) : on ne montre que la moitié utile de l'image
+  tex.repeat.set(l === 'sbs' ? 0.5 : 1, l === 'tb' ? 0.5 : 1);
+  tex.offset.set(0, l === 'tb' ? 0.5 : 0);
+}
+$('fmt').onchange = $('lay').onchange = build;
+// Pré-remplissage depuis le lien : ...#u=<lien vidéo>&f=180&l=sbs
+(function () {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('u')) $('url').value = h.get('u');
+  if (h.get('f')) $('fmt').value = h.get('f');
+  if (h.get('l')) $('lay').value = h.get('l');
+})();
+build();
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+resize();
+
+// ---- Gyroscope ----
+const dq = new THREE.Quaternion();
+const eul = new THREE.Euler();
+const q1 = new THREE.Quaternion(-Math.sqrt(.5), 0, 0, Math.sqrt(.5));
+const q0 = new THREE.Quaternion();
+const qy = new THREE.Quaternion();
+const zee = new THREE.Vector3(0, 0, 1);
+const up = new THREE.Vector3(0, 1, 0);
+let gyro = false, haveFirst = false, yawOff = 0, dragYaw = 0, dragPitch = 0;
+const D = THREE.MathUtils.degToRad;
+
+function recenter() {
+  eul.setFromQuaternion(dq, 'YXZ');
+  yawOff = -eul.y;
+  dragYaw = 0; dragPitch = 0;
+}
+window.addEventListener('deviceorientation', e => {
+  if (e.alpha == null) return;
+  gyro = true;
+  const o = D((screen.orientation && screen.orientation.angle) || window.orientation || 0);
+  eul.set(D(e.beta), D(e.alpha), -D(e.gamma), 'YXZ');
+  dq.setFromEuler(eul);
+  dq.multiply(q1);
+  dq.multiply(q0.setFromAxisAngle(zee, -o));
+  if (!haveFirst) { haveFirst = true; recenter(); }
+});
+
+// ---- Glisser pour tourner / toucher pour les contrôles ----
+let sx = 0, sy = 0, lx = 0, ly = 0, moved = false;
+renderer.domElement.addEventListener('touchstart', e => {
+  const t = e.touches[0]; sx = lx = t.clientX; sy = ly = t.clientY; moved = false;
+}, {passive: true});
+renderer.domElement.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  dragYaw += (t.clientX - lx) * 0.005;
+  if (!gyro) dragPitch = Math.max(-1.5, Math.min(1.5, dragPitch + (t.clientY - ly) * 0.005));
+  lx = t.clientX; ly = t.clientY;
+  if (Math.abs(lx - sx) + Math.abs(ly - sy) > 8) moved = true;
+}, {passive: true});
+renderer.domElement.addEventListener('touchend', () => { if (!moved) toggleBar(); });
+renderer.domElement.addEventListener('click', e => { if (e.pointerType === 'mouse') toggleBar(); });
+
+function toggleBar() {
+  const b = $('bar');
+  b.style.display = b.style.display === 'flex' ? 'none' : 'flex';
+}
+
+// ---- Chargement ----
+function err(m) { $('err').textContent = m || ''; }
+
+function start(src) {
+  err('');
+  build();
+  // Appels synchrones dans le geste de l'utilisateur (obligatoire sur iOS)
+  const perm = (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission)
+    ? DeviceOrientationEvent.requestPermission().catch(() => 'denied')
+    : Promise.resolve('granted');
+  video.crossOrigin = src.startsWith('blob:') ? null : 'anonymous';
+  if (!video.crossOrigin) video.removeAttribute('crossorigin');
+  video.src = src;
+  const pl = video.play();
+  Promise.all([perm, pl && pl.catch ? pl : Promise.resolve()]).then(([p]) => {
+    $('menu').style.display = 'none';
+    $('bar').style.display = 'flex';
+    setTimeout(() => { if (!moved) $('bar').style.display = 'none'; }, 3500);
+    if (p !== 'granted') err('Gyroscope refusé : glisse le doigt pour tourner.');
+  }).catch(() => {
+    err('Lecture impossible (lien invalide, bloqué ou format non pris en charge).');
+  });
+}
+
+video.addEventListener('error', () => {
+  $('menu').style.display = 'flex';
+  err('Impossible de charger cette vidéo (lien invalide ou accès bloqué par le serveur).');
+});
+
+$('goUrl').onclick = () => {
+  const u = $('url').value.trim();
+  if (!u) return err('Colle un lien.');
+  start(u);
+};
+$('file').onchange = e => {
+  const f = e.target.files[0];
+  if (f) start(URL.createObjectURL(f));
+};
+
+// ---- Contrôles ----
+$('pp').onclick = () => {
+  if (video.paused) { video.play(); $('pp').textContent = '⏸'; }
+  else { video.pause(); $('pp').textContent = '▶'; }
+};
+$('rc').onclick = recenter;
+$('mn').onclick = () => { video.pause(); $('menu').style.display = 'flex'; $('bar').style.display = 'none'; $('pp').textContent = '▶'; };
+$('seek').oninput = () => { if (video.duration) video.currentTime = video.duration * $('seek').value / 1000; };
+video.addEventListener('timeupdate', () => {
+  if (video.duration && document.activeElement !== $('seek')) $('seek').value = 1000 * video.currentTime / video.duration;
+});
+
+// ---- Boucle de rendu ----
+function frame() {
+  requestAnimationFrame(frame);
+  if (gyro) {
+    qy.setFromAxisAngle(up, yawOff + dragYaw);
+    camera.quaternion.copy(qy).multiply(dq);
+  } else {
+    eul.set(dragPitch, dragYaw, 0, 'YXZ');
+    camera.quaternion.setFromEuler(eul);
+  }
+  renderer.render(scene, camera);
+}
+frame();
+</script>
+</body>
+</html>
